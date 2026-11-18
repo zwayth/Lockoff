@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="branding/lockoff-logo-dark.svg">
-    <img src="branding/lockoff-logo-light.svg" alt="Lockoff" height="56">
+    <source media="(prefers-color-scheme: dark)" srcset="branding/lockoff-logo-light.svg">
+    <img src="branding/lockoff-logo-dark.svg" alt="Lockoff" height="56">
   </picture>
 </p>
 
