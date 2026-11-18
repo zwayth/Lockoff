@@ -1,0 +1,12 @@
+# Clip Factory runtime (Python 3.12). Versions verified working together on 2026-11-17.
+numpy==2.2.6
+opencv-contrib-python-headless==5.0.0.93
+onnxruntime==1.32.0
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+scenedetect==0.7.3
+yt-dlp[default]==2026.10.26
+pytest==9.2.0
+# GPU transcription on NVIDIA cards (CUDA 12 / cuDNN 9). Harmless without an NVIDIA GPU.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.28.1.4

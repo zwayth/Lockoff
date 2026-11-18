@@ -1,0 +1,17 @@
+# environments and downloaded tools
+.venv/
+.python/
+tools/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# your work stays on your machine
+Jobs/
+Inbox/
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.m4a
+!docs/**
