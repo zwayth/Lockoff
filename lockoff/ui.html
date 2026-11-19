@@ -138,6 +138,7 @@ details>summary svg{transition:transform .15s var(--ease)}
   <aside>
     <div class="brand"><img class="dark" src="/brand/lockoff-logo-dark.svg" alt="Lockoff"><img class="light" src="/brand/lockoff-logo-light.svg" alt="Lockoff"></div>
     <button class="btn" id="newBtn" style="width:100%;justify-content:flex-start"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New job</button>
+    <button class="btn" id="liveBtn" style="width:100%;justify-content:flex-start;margin-top:6px"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M2 12a10 10 0 0 1 20 0M5 12a7 7 0 0 1 14 0"/></svg>Live &amp; publish</button>
     <div class="navlabel s12 t3">Jobs</div>
     <div class="jobs" id="jobs"></div>
     <div class="foot s12 t3">Runs on this PC · nothing is uploaded</div>
@@ -191,6 +192,41 @@ details>summary svg{transition:transform .15s var(--ease)}
     <div class="err" id="err"></div>
   </div>
   <div class="card pad" id="runPanel"></div>
+</div>
+</template>
+
+<template id="tplLive">
+<div class="newjob enter">
+  <div class="card pad">
+    <div class="h2">Rolling live buffer</div>
+    <p class="s13 t2" style="margin:0 0 16px">Lockoff records a stream into short pieces and keeps only the last few minutes. Transcripts run live, so “clip that”, loud moments and the button below all cut straight from the buffer — no need for the stream to finish.</p>
+    <div class="field"><label class="f" for="liveUrl">Live channel URL</label><input class="in" id="liveUrl" placeholder="https://youtube.com/@channel/live" autocomplete="off"></div>
+    <div class="grid2">
+      <div class="field"><label class="f" for="liveWs">Workspace</label><select class="in" id="liveWs"></select></div>
+      <div class="field"><label class="f" for="liveBuf">Minutes to keep</label><input class="in mono" id="liveBuf" type="number" min="3" value="15"></div>
+    </div>
+    <button class="btn pri" id="liveStart">Start recording</button>
+    <div id="liveList" style="margin-top:18px"></div>
+  </div>
+  <div class="card pad">
+    <div class="h2">Creator workspaces</div>
+    <p class="s13 t2" style="margin:0 0 12px">Each creator keeps their own channel, credit line and trigger phrases.</p>
+    <div id="wsList"></div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="field"><label class="f" for="wsName">Name</label><input class="in" id="wsName" placeholder="peakcut"></div>
+      <div class="field"><label class="f" for="wsChannel">Channel URL</label><input class="in" id="wsChannel" placeholder="https://twitch.tv/…"></div>
+      <div class="field"><label class="f" for="wsCredit">Credit</label><input class="in" id="wsCredit" placeholder="@creator"></div>
+      <div class="field"><label class="f" for="wsTriggers">Trigger phrases</label><input class="in" id="wsTriggers" placeholder="clip it, that was insane"></div>
+    </div>
+    <button class="btn" id="wsSave" style="margin-top:8px">Save workspace</button>
+  </div>
+  <div class="card pad">
+    <div class="h2">Publishing</div>
+    <div id="queueInfo" class="s13 t2"></div>
+    <button class="btn" id="queueGo" style="margin-top:10px">Queue finished clips to Buffer</button>
+    <div class="h2" style="margin-top:22px">Activity</div>
+    <div id="activityList"></div>
+  </div>
 </div>
 </template>
 
@@ -340,9 +376,55 @@ $('#capc').onclick=()=>$('#capm').classList.remove('on');
 $('#caps').onclick=async()=>{await api(`/api/captions/${encodeURIComponent(sel)}/${capFor}`,{text:$('#capt').value});$('#capm').classList.remove('on');rerender(capFor)};
 document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#capm').classList.remove('on')});
 $('#newBtn').onclick=showNew;
+$('#liveBtn').onclick=showLive;
+
+/* ---------- live / workspaces / queue ---------- */
+function showLive(){
+  view='live';sel=null;$('#title').textContent='Live & publish';history.replaceState(null,'',location.pathname);
+  $('#page').innerHTML='';$('#page').append($('#tplLive').content.cloneNode(true));
+  $('#liveStart').onclick=async()=>{$('#liveStart').disabled=true;
+    const r=await api('/api/live/start',{url:$('#liveUrl').value,workspace:$('#liveWs').value,
+      buffer:+$('#liveBuf').value});$('#liveStart').disabled=false;
+    if(r.error)toast(r.error);else{toast('Recording started');$('#liveUrl').value='';renderLive()}};
+  $('#wsSave').onclick=async()=>{const r=await api('/api/workspace',{name:$('#wsName').value,
+    channel:$('#wsChannel').value,credit:$('#wsCredit').value,triggers:$('#wsTriggers').value});
+    if(r.error)toast(r.error);else{toast('Workspace saved');$('#wsName').value='';renderLive()}};
+  $('#queueGo').onclick=async()=>{const r=await api('/api/queue',{});toast(r.error||`Queued ${r.sent?.length||0} clip(s)`);renderLive()};
+  renderLive();
+}
+async function renderLive(){
+  if(view!=='live')return;
+  const [sessions,ws,queue,act]=await Promise.all([
+    api('/api/live'),api('/api/workspaces'),api('/api/queue'),api('/api/activity')]);
+  const wsel=$('#liveWs'),old=wsel.value;
+  wsel.innerHTML=Object.keys(ws).map(n=>`<option ${n===old?'selected':''}>${esc(n)}</option>`).join('')||'<option>default</option>';
+  $('#liveList').innerHTML=sessions.length?sessions.map(s=>`<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="dot" style="background:${s.status==='live'?'var(--ok)':'var(--t3)'}"></span>
+      <b>${esc(s.name)}</b><span class="s12 t3">${esc(s.workspace||'default')}</span>
+      <span class="num s12">${tc(s.elapsed)} recorded · ${tc(s.buffer_sec)} buffered · ${s.words||0} words</span>
+      <span style="margin-left:auto" class="s12 ${s.status==='live'?'':'t3'}">${esc(s.status)}</span></div>
+    ${s.error?`<div class="err" style="margin:8px 0 0">${esc(s.error)}</div>`:''}
+    <div class="s13 t2" style="margin:8px 0">${esc((s.last_lines||[''])[0]||'')}</div>
+    ${(s.clips||[]).map(c=>`<div class="s12" style="padding:4px 0;border-top:1px solid var(--line2)">
+      <span class="mono">${esc(c.id)}</span> <span class="${c.status==='done'?'':'t3'}">${esc(c.status)}</span>
+      ${esc(c.why||'')} ${c.title?`· ${esc(c.title.slice(0,60))}`:''}</div>`).join('')}
+    <div class="acts" style="margin-top:10px">
+      <button class="btn sm" onclick="liveClip(${JSON.stringify(s.name)},30)">Clip last 30s</button>
+      <button class="btn sm" onclick="liveClip(${JSON.stringify(s.name)},60)">Clip last 60s</button>
+      ${s.status==='live'?`<button class="btn sm ghost" onclick="liveStop(${JSON.stringify(s.name)})">Stop</button>`:''}</div>
+  </div>`).join(''):'<div class="s13 t3">No sessions yet. Start one above.</div>';
+  $('#wsList').innerHTML=Object.entries(ws).map(([n,w])=>`<div class="s13" style="padding:6px 0;border-bottom:1px solid var(--line2)">
+    <b>${esc(n)}</b> <span class="t3">${esc(w.channel||'no channel')} · ${esc(w.credit||'no credit')} · ${esc(w.triggers||'no triggers')}</span></div>`).join('')||'<div class="s13 t3">No workspaces yet.</div>';
+  $('#queueInfo').innerHTML=`${queue.candidates||0} finished clip(s) waiting · ${queue.posted||0} already published · ${queue.media||0} URL(s) tracked`;
+  $('#activityList').innerHTML=act.map(a=>`<div class="s12 t2" style="padding:3px 0">
+    <span class="mono">${new Date(a.t*1000).toLocaleString()}</span> · ${esc(a.creator)} · ${esc(a.message)}</div>`).join('')||'<div class="s13 t3">Nothing yet.</div>';
+}
+window.liveClip=async(name,seconds)=>{const r=await api('/api/live/clip',{session:name,seconds});toast(r.error||`Clip ${r.id} queued`);renderLive()};
+window.liveStop=async name=>{await api('/api/live/stop',{session:name});toast('Stopping');renderLive()};
 
 /* ---------- poll ---------- */
-async function poll(){status=await api('/api/status');renderStatus();if(view==='new')renderRun();
+async function poll(){status=await api('/api/status');renderStatus();if(view==='new')renderRun();if(view==='live')renderLive();
   const done=status.history&&status.history[0]&&status.history[0].id;
   if(done!==lastDone){const first=lastDone===null;lastDone=done;await loadJobs();if(!first&&view==='job'&&sel)openJob(sel,true)}}
 const h=decodeURIComponent(location.hash.replace(/^#job=/,''));

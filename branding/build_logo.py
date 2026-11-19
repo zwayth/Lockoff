@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 FONT = HERE.parent / "lockoff" / "assets" / "fonts" / "Geist-Variable.ttf"
 NAME = "Lockoff"
 
-INK_DARK = "#ededed"      # mark/wordmark on dark backgrounds (graphite ramp primary text)
+INK_DARK = "#FFFFFF"      # mark/wordmark on dark backgrounds (pure white)
 INK_LIGHT = "#171717"     # on light backgrounds
 TILE = "#141415"          # app-icon tile (graphite page background)
 TALLY = "#ff4d2e"         # accent: camera tally light

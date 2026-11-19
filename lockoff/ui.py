@@ -22,6 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from . import live as LIVE
+from . import queue as QMOD
+from . import workspaces as W
 from .util import JOBS, ROOT, read_json, write_json
 
 HOST, PORT = "127.0.0.1", 8765
@@ -117,7 +120,7 @@ def _tail(path: str | None, n: int = 60) -> str:
 def jobs() -> list[dict]:
     out = []
     for d in sorted(JOBS.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not d.is_dir() or d.name.startswith("_logs"):
+        if not d.is_dir() or d.name.startswith("_"):
             continue
         plan = read_json(d / "plan.json")
         src = read_json(d / "_work" / "source.json") or {}
@@ -306,6 +309,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"path": pick_file()})
         elif p.startswith("/api/signals/"):
             self._json(signals_for(p.split("/")[3]))
+        elif p == "/api/live":
+            self._json(LIVE.status_all())
+        elif p == "/api/activity":
+            self._json(W.activity(50))
+        elif p == "/api/workspaces":
+            self._json(W.all_creators())
+        elif p == "/api/queue":
+            st = QMOD._state()
+            self._json({"posted": len(st["posted"]),
+                        "candidates": len(QMOD.candidates()),
+                        "media": len(st["media"])})
         elif p.startswith("/assets/") or p.startswith("/brand/"):
             root = ASSETS if p.startswith("/assets/") else BRANDING
             f = (root / p.split("/", 2)[2]).resolve()
@@ -360,6 +374,36 @@ class Handler(BaseHTTPRequestHandler):
             if d:
                 os.startfile(d)  # noqa: S606 — opens Explorer on this PC
             self._json({"ok": bool(d)})
+        elif p == "/api/live/start":
+            url = (b.get("url") or "").strip().strip('"')
+            if not re.match(r"https?://", url):
+                return self._json({"error": "paste a live channel URL"}, 400)
+            try:
+                s = LIVE.start_session(url, b.get("workspace") or "default",
+                                       buffer_min=int(b.get("buffer") or 15),
+                                       model=b.get("model") or "small")
+                self._json(s.status())
+            except Exception as e:  # noqa: BLE001
+                self._json({"error": str(e)[:300]}, 400)
+        elif p == "/api/live/stop":
+            self._json({"stopped": LIVE.stop_session(b.get("session", ""))})
+        elif p == "/api/live/clip":
+            try:
+                self._json(LIVE.clip_last(b.get("session", ""), float(b.get("seconds") or 30)))
+            except Exception as e:  # noqa: BLE001
+                self._json({"error": str(e)[:300]}, 400)
+        elif p == "/api/workspace":
+            name = (b.get("name") or "").strip()
+            if not name:
+                return self._json({"error": "workspace needs a name"}, 400)
+            self._json(W.upsert(name, b.get("channel", ""), b.get("credit", ""),
+                                b.get("triggers", ""), int(b.get("buffer") or 15)))
+        elif p == "/api/queue":
+            try:
+                self._json({"sent": QMOD.queue(dry_run=bool(b.get("dry_run")),
+                                                max_scheduled=int(b.get("max") or 10))})
+            except Exception as e:  # noqa: BLE001
+                self._json({"error": str(e)[:300]}, 400)
         else:
             self.send_error(404)
 

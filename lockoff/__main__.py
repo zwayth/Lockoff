@@ -9,6 +9,19 @@
   lockoff batch <list.txt> [run options]                        one source (file or URL) per line
   lockoff clean <jobDir>                                        delete _work, keep final clips + clips.md
   lockoff doctor                                                check the toolchain
+
+  lockoff live <url> [--workspace NAME] [--buffer 15] [--model small]
+                                                                record a live stream into a rolling buffer
+  lockoff live-status                                           show live sessions and their queued clips
+  lockoff live-clip <session> [seconds]                          clip the last N seconds out of the buffer
+  lockoff live-stop <session>                                   stop a recording
+  lockoff workspace <name> [--channel URL] [--credit @h] [--triggers "clip it,GG"]
+                                                                create/update a creator workspace
+  lockoff workspaces                                            list workspaces, or `lockoff activity`
+  lockoff queue [--dry-run] [--max 10] [--mode addToQueue|shareNow]
+                                                                publish finished clips through Buffer
+  lockoff refresh-urls [--dry-run]                              refresh media URLs on soon-to-publish posts
+  lockoff post --setup                                          store the Buffer token for this product
 """
 from __future__ import annotations
 
@@ -22,6 +35,7 @@ from pathlib import Path
 from . import factory as F
 from .ingest import VIDEO_EXT
 from . import util as U
+from .social import BufferError
 from .util import JOBS, ROOT, StageError, encoder, log, set_power
 
 
@@ -133,6 +147,46 @@ def main(argv=None) -> int:
     p = sub.add_parser("clean")
     p.add_argument("job")
     sub.add_parser("doctor")
+
+    # -- live buffer / workspaces / publishing -------------------------------
+    p = sub.add_parser("live", help="record a stream into a rolling buffer")
+    p.add_argument("url")
+    p.add_argument("--workspace", default="default")
+    p.add_argument("--buffer", type=int, default=15, help="minutes of stream kept in the buffer")
+    p.add_argument("--name")
+    p.add_argument("--model", default="small")
+    p.add_argument("--lang")
+    p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
+    p.add_argument("--credit")
+    p.add_argument("--no-auto-clip", dest="auto_clip", action="store_false", default=True)
+    p = sub.add_parser("live-status", help="show live sessions")
+    p = sub.add_parser("live-stop")
+    p.add_argument("session")
+    p = sub.add_parser("live-clip")
+    p.add_argument("session")
+    p.add_argument("seconds", type=float, nargs="?", default=30)
+    p = sub.add_parser("workspace")
+    p.add_argument("name")
+    p.add_argument("--channel", default="")
+    p.add_argument("--credit", default="")
+    p.add_argument("--triggers", default="")
+    p.add_argument("--buffer", dest="buffer_min", type=int, default=15)
+    p.add_argument("--no-auto-clip", dest="auto_clip", action="store_false", default=True)
+    sub.add_parser("workspaces")
+    sub.add_parser("activity")
+    p = sub.add_parser("queue", help="publish rendered clips through Buffer")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--max", type=int, default=10)
+    p.add_argument("--mode", choices=["addToQueue", "shareNow"], default="addToQueue")
+    p = sub.add_parser("refresh-urls")
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("post", help="publish a finished job's clips")
+    p.add_argument("job", nargs="?")
+    p.add_argument("--clip")
+    p.add_argument("--mode", choices=["shareNow", "addToQueue"], default="shareNow")
+    p.add_argument("--credit")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--setup", action="store_true")
     a = ap.parse_args(argv)
     set_power(getattr(a, "power", None))
     try:
@@ -155,7 +209,78 @@ def main(argv=None) -> int:
             F.clean(Path(a.job) if Path(a.job).exists() else JOBS / a.job)
         elif a.cmd == "doctor":
             return doctor()
-    except (StageError, subprocess.TimeoutExpired) as e:
+        elif a.cmd == "live":
+            from . import live as L
+            s = L.start_session(a.url, a.workspace, buffer_min=a.buffer, name=a.name,
+                                model=a.model, language=a.lang, device=a.device,
+                                credit=a.credit, auto_clip=a.auto_clip)
+            log(f"recording {s.url} → {s.dir}")
+            log("press Ctrl+C to stop (the rolling buffer is kept on disk)")
+            try:
+                while s.name in L.SESSIONS and not s.stop_flag.wait(2):
+                    pass
+            except KeyboardInterrupt:
+                s.stop()
+        elif a.cmd == "live-status":
+            from . import live as L
+            sessions = L.status_all()
+            if not sessions:
+                print("no live sessions yet — run `lockoff live <url>`")
+            for s in sessions:
+                print(f"{s['name']}  {s['status']:9} {s.get('elapsed', 0):>6}s  "
+                      f"buffer {s.get('buffer_sec', 0):>5}s  words {s.get('words', 0):>4}  "
+                      f"clips {len(s.get('clips', []))}  [{s.get('workspace')}]")
+                for c in s.get("clips", []):
+                    print(f"    {c['id']}  {c['status']:5}  {c.get('why', '')}  {c.get('title', '')[:60]}")
+        elif a.cmd == "live-stop":
+            from . import live as L
+            print("stopped" if L.stop_session(a.session) else f"session {a.session} not running")
+        elif a.cmd == "live-clip":
+            from . import live as L
+            req = L.clip_last(a.session, a.seconds)
+            log(f"clip {req['id']} requested from the last {a.seconds:g}s")
+        elif a.cmd == "workspace":
+            from . import workspaces as W
+            w = W.upsert(a.name, a.channel, a.credit, a.triggers, a.buffer_min, a.auto_clip)
+            print(f"workspace saved: {w['name']} ({w['channel'] or 'no channel'})")
+        elif a.cmd == "workspaces":
+            from . import workspaces as W
+            for name, w in sorted(W.all_creators().items()):
+                print(f"{name:20} {w.get('channel', ''):45} credit {w.get('credit', '')}")
+        elif a.cmd == "activity":
+            from . import workspaces as W
+            for e in W.activity(30):
+                print(f"{time.strftime('%m-%d %H:%M', time.localtime(e['t']))}  "
+                      f"{e['creator']:18} {e['message']}")
+        elif a.cmd == "queue":
+            from . import queue as Q
+            Q.queue(max_scheduled=a.max, mode=a.mode, dry_run=a.dry_run)
+        elif a.cmd == "refresh-urls":
+            from . import queue as Q
+            n = Q.refresh_due_urls(dry_run=a.dry_run)
+            log(f"refreshed {n} scheduled post URL(s)")
+        elif a.cmd == "post":
+            from . import social as S
+            if a.setup:
+                cfg = S.load_config()
+                cfg["buffer_token"] = input("Buffer API key: ").strip()
+                org = cfg.get("organization_id")
+                if not org:
+                    try:
+                        org = S.Buffer(cfg["buffer_token"]).organizations()[0]["id"]
+                    except Exception:  # noqa: BLE001
+                        org = ""
+                cfg["organization_id"] = input(f"Buffer organization id [{org}]: ").strip() or org
+                S.save_config(cfg)
+                print(f"saved to {S.CONFIG}")
+            elif not a.job:
+                ap.error("lockoff post needs a job directory (or --setup)")
+            else:
+                job = Path(a.job) if Path(a.job).exists() else JOBS / a.job
+                no = [int(x) for x in a.clip.split(",")] if a.clip else [1]
+                for i in no:
+                    print(S.post_clip(job, i, mode=a.mode, credit=a.credit, dry_run=a.dry_run))
+    except (StageError, BufferError, subprocess.TimeoutExpired) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

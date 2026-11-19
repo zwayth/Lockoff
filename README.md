@@ -159,6 +159,47 @@ Not yet. The pipeline is Python and FFmpeg, so the work is mostly the launchers.
 **Can I clip anyone's stream?**
 Only clip your own content, or creators who allow it, and credit them with `--credit`. Lockoff never uploads anything for you.
 
+## Live buffer, workspaces and publishing
+
+Lockoff also has the parts of a self-hosted clipping studio that don't need a
+server. Open **Live & publish** in the web UI, or use the CLI:
+
+```bat
+lockoff workspace peakcut --channel https://www.twitch.tv/peakcut --credit @peakcut --triggers "clip it, that was insane"
+lockoff live https://www.twitch.tv/peakcut --workspace peakcut --buffer 15
+lockoff live-status
+lockoff live-clip live-20261119-183000 30
+lockoff live-stop live-20261119-183000
+```
+
+`lockoff live` records the stream into 6-second pieces, keeps only the last
+`--buffer` minutes, transcribes as it goes, and renders a clip straight from
+the buffer when someone says *clip that*, a configured trigger phrase is said,
+or the stream suddenly gets loud. Clips go through the same reframe, caption
+and QA pipeline as a file job. Sessions and their activity are stored in
+`Jobs/_live/<session>/` and `lockoff_workspaces.json`.
+
+Publishing uses Buffer through Lockoff's **own** config and state
+(`lockoff_social.json`, `lockoff_queue.json`):
+
+```bat
+lockoff post --setup
+lockoff queue
+lockoff refresh-urls
+```
+
+`lockoff queue` publishes finished clips; `lockoff refresh-urls` re-uploads the
+local file for any post due within two hours and swaps the fresh link in
+before Buffer fetches it (temporary hosts expire links).
+
+**How this differs from Clip Factory.** They are deliberately separate
+products. Clip Factory owns the unattended Instagram scrape → render → Buffer
+pipeline and its Windows scheduled task. Lockoff is the interactive studio:
+manual jobs, live rolling buffer, creator workspaces and an optional publish
+queue. They share no config, state, credentials or scheduled tasks, so one can
+be changed without risking the other. See `ARCHITECTURE.md` for the full
+rationale and what was deliberately left out.
+
 ## Limits
 
 - Windows only for now
