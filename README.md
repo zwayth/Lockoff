@@ -165,12 +165,17 @@ Lockoff also has the parts of a self-hosted clipping studio that don't need a
 server. Open **Live & publish** in the web UI, or use the CLI:
 
 ```bat
-lockoff workspace peakcut --channel https://www.twitch.tv/peakcut --credit @peakcut --triggers "clip it, that was insane"
-lockoff live https://www.twitch.tv/peakcut --workspace peakcut --buffer 15
+lockoff workspace mycreator --channel https://www.twitch.tv/mycreator --credit @mycreator --triggers "clip it, that was insane"
+lockoff live https://www.twitch.tv/mycreator --workspace mycreator --buffer 15
 lockoff live-status
 lockoff live-clip live-20261119-183000 30
 lockoff live-stop live-20261119-183000
 ```
+
+Replace `mycreator` / `@mycreator` with the **actual streamer whose stream you
+are clipping** — that is who the credit line is for. PeakCut is only the
+open-source app we studied for features; it is not a content source and should
+never be credited.
 
 `lockoff live` records the stream into 6-second pieces, keeps only the last
 `--buffer` minutes, transcribes as it goes, and renders a clip straight from

@@ -10,7 +10,7 @@ stream never finished downloading.
 Unlike PeakCut this needs no server, sign-in, public HTTPS address or Meta app.
 Everything stays in Jobs/_live/<session>/ on this PC.
 
-    lockoff live <url> --workspace peakcut --buffer 15 --model small
+    lockoff live <url> --workspace mycreator --buffer 15 --model small
     lockoff live-status
     lockoff live-clip <session> 30
     lockoff live-stop <session>
